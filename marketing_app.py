@@ -15,14 +15,12 @@ st.title("AI Marketing Planner with Voice Option")
 if 'user_info' not in st.session_state:
     st.session_state.user_info = {}
 
-# Helper function to transcribe audio using Whisper via OpenAI
-def transcribe_audio(file) -> str:
+# Helper function to transcribe audio using OpenAI Whisper
+def transcribe_audio_file(file) -> str:
     if file is not None:
-        # Save file to a temporary location
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(file.read())
             tmp_path = tmp.name
-        # Use OpenAI Whisper to transcribe
         try:
             transcript = openai.Audio.transcribe("whisper-1", open(tmp_path, "rb"))
             return transcript["text"]
@@ -81,7 +79,6 @@ def generate_90_day_plan(user_info: Dict[str, Any]) -> Dict[str, Any]:
             functions=functions,
             function_call={"name": "generate_90_day_plan"},
         )
-        # Extract arguments from tool call
         arguments = json.loads(
             response["choices"][0]["message"]["function_call"]["arguments"]
         )
@@ -90,12 +87,10 @@ def generate_90_day_plan(user_info: Dict[str, Any]) -> Dict[str, Any]:
         st.error(f"Error generating plan: {e}")
         return {}
 
-# Input method selection
-input_method = st.radio(
-    "Select input method for providing answers:", ["Text", "Voice (upload audio)"]
-)
+# Input method selection (text vs voice)
+input_method = st.radio("Select input method for providing answers:", ["Text", "Voice"])
 
-# Text or voice inputs for each field
+# Fields definitions
 fields = [
     ("icp", "Describe your ideal customer profile (e.g., demographics, roles, company size, pain points)"),
     ("product", "Describe your product/service and what makes it unique"),
@@ -106,22 +101,23 @@ fields = [
     ("channels", "Preferred marketing channels (e.g., LinkedIn, email, webinars)"),
 ]
 
+# Collect inputs
 for key, prompt in fields:
     if input_method == "Text":
         st.session_state.user_info[key] = st.text_area(
-            prompt, value=st.session_state.user_info.get(key, ""), key=key
+            prompt,
+            value=st.session_state.user_info.get(key, ""),
+            key=key
         )
     else:
-        # Voice input: file uploader then transcribe
-        uploaded_file = st.file_uploader(
-            f"{prompt} (upload audio file)", type=["mp3", "wav"], key=f"{key}_audio"
-        )
-        if uploaded_file is not None:
-            transcribed_text = transcribe_audio(uploaded_file)
-            st.session_state.user_info[key] = transcribed_text
-            st.write(f"Transcribed {key}: {transcribed_text}")
+        # Record audio from microphone using Streamlit's audio_input widget
+        audio_data = st.audio_input(f"{prompt}")
+        if audio_data is not None:
+            transcribed = transcribe_audio_file(audio_data)
+            st.session_state.user_info[key] = transcribed
+            st.write(f"Transcribed {key}: {transcribed}")
         else:
-            st.write("Awaiting audio file...")
+            st.write("Please record your answer.")
 
 # Generate plan button
 if st.button("Generate 90-Day Plan"):
@@ -132,6 +128,4 @@ if st.button("Generate 90-Day Plan"):
             st.subheader("Generated 90-Day Plan")
             st.json(plan)
     else:
-        st.warning(
-            "Please provide at least the required fields (ICP, product, stage, goals) before generating the plan."
-        )
+        st.warning("Please provide at least the required fields (ICP, product, stage, goals) before generating the plan.")
