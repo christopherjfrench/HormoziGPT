@@ -3,51 +3,77 @@ import streamlit as st
 from typing import Dict, Any
 import openai
 import json
+import tempfile
 
 # Load API key and model from environment
 openai.api_key = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4-0613")  # default model; set to gpt-5 if available
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4-0613")
 
-st.title("AI Marketing Planner")
+st.title("AI Marketing Planner with Voice Option")
 
-# Initialize session state
+# Initialize session state for storing answers
 if 'user_info' not in st.session_state:
     st.session_state.user_info = {}
 
+# Helper function to transcribe audio using Whisper via OpenAI
+def transcribe_audio(file) -> str:
+    if file is not None:
+        # Save file to a temporary location
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(file.read())
+            tmp_path = tmp.name
+        # Use OpenAI Whisper to transcribe
+        try:
+            transcript = openai.Audio.transcribe("whisper-1", open(tmp_path, "rb"))
+            return transcript["text"]
+        except Exception as e:
+            st.error(f"Error transcribing audio: {e}")
+    return ""
+
+# Define function-calling to generate 90-day marketing plan
 def generate_90_day_plan(user_info: Dict[str, Any]) -> Dict[str, Any]:
     """Generate a 90-day marketing plan based on detailed user information."""
-    functions = [{
-        "name": "generate_90_day_plan",
-        "description": ("Generate a 90-day marketing plan given a detailed ideal customer profile (ICP), "
-                        "product/service description, business stage, customer reviews, goals, "
-                        "marketing budget and preferred channels."),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "icp": {"type": "string"},
-                "product": {"type": "string"},
-                "stage": {"type": "string"},
-                "reviews": {"type": "string"},
-                "goals": {"type": "string"},
-                "budget": {"type": "string"},
-                "channels": {"type": "string"},
+    functions = [
+        {
+            "name": "generate_90_day_plan",
+            "description": (
+                "Generate a 90-day marketing plan given a detailed ideal customer profile (ICP), "
+                "product/service description, business stage, customer reviews, goals, "
+                "marketing budget and preferred channels."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "icp": {"type": "string"},
+                    "product": {"type": "string"},
+                    "stage": {"type": "string"},
+                    "reviews": {"type": "string"},
+                    "goals": {"type": "string"},
+                    "budget": {"type": "string"},
+                    "channels": {"type": "string"},
+                },
+                "required": ["icp", "product", "stage", "goals"],
             },
-            "required": ["icp", "product", "stage", "goals"]
         }
-    }]
-    messages = [
-        {"role": "system", "content": "You are a helpful marketing assistant that creates comprehensive 90-day marketing plans."},
-        {"role": "user", "content": (
-            f"Create a 90-day marketing plan for this business.\n"
-            f"ICP: {user_info['icp']}\n"
-            f"Product: {user_info['product']}\n"
-            f"Stage: {user_info['stage']}\n"
-            f"Reviews: {user_info['reviews']}\n"
-            f"Goals: {user_info['goals']}\n"
-            f"Budget: {user_info['budget']}\n"
-            f"Preferred Channels: {user_info['channels']}"
-        )},
     ]
+
+    messages = [
+        {"role": "system", "content": "You are an expert marketing strategist."},
+        {
+            "role": "user",
+            "content": (
+                f"Ideal customer profile: {user_info.get('icp','')}\n"
+                f"Product/service description: {user_info.get('product','')}\n"
+                f"Business stage: {user_info.get('stage','')}\n"
+                f"Reviews/testimonials: {user_info.get('reviews','')}\n"
+                f"Goals: {user_info.get('goals','')}\n"
+                f"Marketing budget: {user_info.get('budget','')}\n"
+                f"Preferred channels: {user_info.get('channels','')}\n"
+                "Please return a 90-day marketing plan."
+            ),
+        },
+    ]
+
     try:
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
@@ -55,38 +81,57 @@ def generate_90_day_plan(user_info: Dict[str, Any]) -> Dict[str, Any]:
             functions=functions,
             function_call={"name": "generate_90_day_plan"},
         )
-        plan_args = response["choices"][0]["message"]["function_call"]["arguments"]
-        plan = json.loads(plan_args)
+        # Extract arguments from tool call
+        arguments = json.loads(
+            response["choices"][0]["message"]["function_call"]["arguments"]
+        )
+        return arguments
     except Exception as e:
-        plan = {"error": str(e)}
-    return plan
+        st.error(f"Error generating plan: {e}")
+        return {}
 
-with st.form("user_info_form"):
-    st.header("Tell us about your business")
-    icp = st.text_area("Describe your ideal customer profile (ICP) in detail (demographics, roles, company size, pain points)", "")
-    product = st.text_area("Describe your product or service and its unique selling points", "")
-    stage = st.selectbox("What stage is your business in?", ["Pre-launch", "Start-up", "Scaling", "Mature"])
-    reviews = st.text_area("Provide any customer reviews, testimonials, or case studies (optional)", "")
-    goals = st.text_area("What are your specific goals for the next 90 days? (e.g., number of leads, revenue target, brand awareness)", "")
-    budget = st.text_input("What is your approximate marketing budget for this period? (e.g., $5,000)", "")
-    channels = st.text_area("Preferred marketing channels (e.g., LinkedIn, email, webinars, paid ads)", "")
-    submitted = st.form_submit_button("Generate 90-Day Plan")
-    if submitted:
-        st.session_state.user_info = {
-            "icp": icp,
-            "product": product,
-            "stage": stage,
-            "reviews": reviews,
-            "goals": goals,
-            "budget": budget,
-            "channels": channels,
-        }
-        st.success("Information saved. Generating your 90-day marketing plan...")
+# Input method selection
+input_method = st.radio(
+    "Select input method for providing answers:", ["Text", "Voice (upload audio)"]
+)
 
-if st.session_state.user_info:
-    st.header("Your 90-Day Marketing Plan")
-    plan = generate_90_day_plan(st.session_state.user_info)
-    if "error" in plan:
-        st.error(plan["error"])
+# Text or voice inputs for each field
+fields = [
+    ("icp", "Describe your ideal customer profile (e.g., demographics, roles, company size, pain points)"),
+    ("product", "Describe your product/service and what makes it unique"),
+    ("stage", "Describe your business stage (startup, scaling, mature, etc.)"),
+    ("reviews", "Provide any customer reviews/testimonials or case studies"),
+    ("goals", "Specify your 90-day goals (e.g., leads, revenue targets)"),
+    ("budget", "Marketing budget for the next 90 days (optional)"),
+    ("channels", "Preferred marketing channels (e.g., LinkedIn, email, webinars)"),
+]
+
+for key, prompt in fields:
+    if input_method == "Text":
+        st.session_state.user_info[key] = st.text_area(
+            prompt, value=st.session_state.user_info.get(key, ""), key=key
+        )
     else:
-        st.write(plan)
+        # Voice input: file uploader then transcribe
+        uploaded_file = st.file_uploader(
+            f"{prompt} (upload audio file)", type=["mp3", "wav"], key=f"{key}_audio"
+        )
+        if uploaded_file is not None:
+            transcribed_text = transcribe_audio(uploaded_file)
+            st.session_state.user_info[key] = transcribed_text
+            st.write(f"Transcribed {key}: {transcribed_text}")
+        else:
+            st.write("Awaiting audio file...")
+
+# Generate plan button
+if st.button("Generate 90-Day Plan"):
+    user_info = st.session_state.user_info
+    if user_info.get("icp") and user_info.get("product") and user_info.get("stage") and user_info.get("goals"):
+        plan = generate_90_day_plan(user_info)
+        if plan:
+            st.subheader("Generated 90-Day Plan")
+            st.json(plan)
+    else:
+        st.warning(
+            "Please provide at least the required fields (ICP, product, stage, goals) before generating the plan."
+        )
