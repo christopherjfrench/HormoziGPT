@@ -5,13 +5,13 @@ import openai
 import json
 import tempfile
 
-# Load API key and model from environment
+# Load API key and model
 openai.api_key = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4-0613")
 
-st.title("AI Marketing Planner with Voice Option")
+st.title("AI Marketing Planner with Voice or File Option")
 
-# Initialize session state for storing answers
+# Initialize session state
 if 'user_info' not in st.session_state:
     st.session_state.user_info = {}
 
@@ -88,9 +88,12 @@ def generate_90_day_plan(user_info: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 # Input method selection (text vs voice)
-input_method = st.radio("Select input method for providing answers:", ["Text", "Voice"])
+input_method = st.radio(
+    "Select input method for providing answers:",
+    ["Text", "Voice"],
+)
 
-# Fields definitions
+# Field definitions
 fields = [
     ("icp", "Describe your ideal customer profile (e.g., demographics, roles, company size, pain points)"),
     ("product", "Describe your product/service and what makes it unique"),
@@ -107,22 +110,42 @@ for key, prompt in fields:
         st.session_state.user_info[key] = st.text_area(
             prompt,
             value=st.session_state.user_info.get(key, ""),
-            key=key
+            key=key,
         )
     else:
-        # Record audio from microphone using Streamlit's audio_input widget
-        audio_data = st.audio_input(f"{prompt}")
+        # Provide both recording and file upload options
+        col1, col2 = st.columns(2)
+        with col1:
+            audio_data = st.audio_input(f"Record your answer for {prompt}")
+        with col2:
+            uploaded_file = st.file_uploader(
+                f"Or upload an audio file for {prompt}",
+                type=["wav", "mp3", "m4a"],
+                key=f"{key}_file",
+            )
+
+        transcribed_text = ""
         if audio_data is not None:
-            transcribed = transcribe_audio_file(audio_data)
-            st.session_state.user_info[key] = transcribed
-            st.write(f"Transcribed {key}: {transcribed}")
+            transcribed_text = transcribe_audio_file(audio_data)
+        elif uploaded_file is not None:
+            transcribed_text = transcribe_audio_file(uploaded_file)
+
+        if transcribed_text:
+            st.session_state.user_info[key] = transcribed_text
+            st.write(f"Transcribed {key}: {transcribed_text}")
         else:
-            st.write("Please record your answer.")
+            # keep previous value if any
+            st.session_state.user_info[key] = st.session_state.user_info.get(key, "")
 
 # Generate plan button
 if st.button("Generate 90-Day Plan"):
     user_info = st.session_state.user_info
-    if user_info.get("icp") and user_info.get("product") and user_info.get("stage") and user_info.get("goals"):
+    if (
+        user_info.get("icp")
+        and user_info.get("product")
+        and user_info.get("stage")
+        and user_info.get("goals")
+    ):
         plan = generate_90_day_plan(user_info)
         if plan:
             st.subheader("Generated 90-Day Plan")
